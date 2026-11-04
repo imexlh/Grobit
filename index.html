@@ -57,13 +57,46 @@ $('profileName').textContent=state.name||'Grobit User';$('profileEmail').textCon
 }
 async function save(){if(!user||!state)return;const{error}=await sb.from('grobit_profiles').upsert({user_id:user.id,data:state,updated_at:new Date().toISOString()},{onConflict:'user_id'});if(error){console.error(error);toast('Could not sync your progress')}}
 function queueSave(){clearTimeout(saveTimer);saveTimer=setTimeout(save,400)}
-async function enter(u){user=u;try{const{data,error}=await sb.from('grobit_profiles').select('data').eq('user_id',u.id).maybeSingle();if(error)throw error;state=data?.data?{...fresh(u.user_metadata?.full_name||u.user_metadata?.name||u.email?.split('@')[0]||'Grobit User'),...data.data}:fresh(u.user_metadata?.full_name||u.user_metadata?.name||u.email?.split('@')[0]||'Grobit User');if(!Array.isArray(state.habits))state.habits=[];if(!data)await save();if(state.lastActive!==today()){const yesterday=new Date(Date.now()-86400000).toLocaleDateString('en-CA');state.streak=state.lastActive===yesterday?state.streak||0:0;state.habits.forEach(h=>h.doneOn='');state.lastActive=today();await save()}render();show('app');page('home')}catch(e){console.error(e);toast('Could not load your Grobit profile. Check Supabase table and policies.');show('auth')}}
+let enteringId=null;
+async function enter(u){
+ if(!u||!sb)return;
+ if(enteringId===u.id)return;
+ enteringId=u.id;user=u;
+ const displayName=u.user_metadata?.full_name||u.user_metadata?.name||u.email?.split('@')[0]||'Grobit User';
+ state=fresh(displayName);
+ render();show('app');page('home');
+ try{
+  const{data,error}=await sb.from('grobit_profiles').select('data').eq('user_id',u.id).maybeSingle();
+  if(error)throw error;
+  if(data?.data){state={...fresh(displayName),...data.data};if(!Array.isArray(state.habits))state.habits=[];}
+  else await save();
+  if(state.lastActive!==today()){
+   const yesterday=new Date(Date.now()-86400000).toLocaleDateString('en-CA');
+   state.streak=state.lastActive===yesterday?state.streak||0:0;
+   state.habits.forEach(h=>h.doneOn='');state.lastActive=today();await save();
+  }
+  render();
+ }catch(e){
+  console.error('Grobit profile sync error:',e);
+  toast('You are signed in. Profile sync needs attention.');
+ }finally{enteringId=null;}
+}
 async function google(){if(!sb){toast('Supabase setup is missing');return}const{error}=await sb.auth.signInWithOAuth({provider:'google',options:{redirectTo:location.origin}});if(error)toast(error.message)}
 $('startBtn').onclick=()=>{show('auth');authPanel('login')};$('toSignup').onclick=()=>authPanel('signup');$('toLogin').onclick=()=>authPanel('login');$('googleLogin').onclick=google;$('googleSignup').onclick=google;
 $('loginForm').onsubmit=async e=>{e.preventDefault();$('loginError').textContent='';if(!sb){$('loginError').textContent='Supabase is not configured.';return}const{data,error}=await sb.auth.signInWithPassword({email:$('loginEmail').value.trim(),password:$('loginPassword').value});if(error){$('loginError').textContent=error.message;return}await enter(data.user)};
-$('signupForm').onsubmit=async e=>{e.preventDefault();$('signupError').textContent='';if(!sb){$('signupError').textContent='Supabase is not configured.';return}const{data,error}=await sb.auth.signUp({email:$('signupEmail').value.trim(),password:$('signupPassword').value,options:{data:{name:$('signupName').value.trim()}}});if(error){$('signupError').textContent=error.message;return}if(data.session)await enter(data.user);else $('signupError').textContent='Please check your email to confirm your account, then log in.'};
+$('signupForm').onsubmit=async e=>{e.preventDefault();$('signupError').textContent='';if(!sb){$('signupError').textContent='Supabase is not configured.';return}const{data,error}=await sb.auth.signUp({email:$('signupEmail').value.trim(),password:$('signupPassword').value,options:{data:{name:$('signupName').value.trim()}}});if(error){$('signupError').textContent=error.message;return}if(data.session)await enter(data.user);else $('signupError').textContent='Your account was created. To enter Grobit immediately, turn off email confirmation in Supabase: Authentication → Providers → Email → Confirm email OFF, then sign up again.'};
 document.addEventListener('click',e=>{const nav=e.target.closest('[data-page]');if(nav){page(nav.dataset.page);return}const d=e.target.closest('[data-done]');if(d&&state){const h=state.habits.find(x=>x.id===d.dataset.done);if(!h||completed(h))return;h.doneOn=today();state.xp=(state.xp||0)+10;state.totalDone=(state.totalDone||0)+1;state.lastActive=today();state.streak=state.streak||1;render();queueSave();toast('Lovely work! +10 points 🍀')}const ic=e.target.closest('[data-icon]');if(ic){selectedIcon=ic.dataset.icon;document.querySelectorAll('[data-icon]').forEach(b=>b.classList.toggle('selected',b===ic))}});
 $('habitForm').onsubmit=e=>{e.preventDefault();const name=$('habitName').value.trim();if(!name)return;state.habits.push({id:crypto.randomUUID(),name,icon:selectedIcon,doneOn:''});$('habitName').value='';render();queueSave();page('habits');toast('Your new habit is planted 🌱')};
 $('signOut').onclick=async()=>{await sb.auth.signOut();user=null;state=null;show('auth');authPanel('login')};
-if(sb){sb.auth.getSession().then(({data,error})=>{if(error){console.error(error);show('splash')}else if(data.session)enter(data.session.user);else show('splash')});sb.auth.onAuthStateChange((event,session)=>{if(event==='SIGNED_IN'&&session?.user&&!user)enter(session.user);if(event==='SIGNED_OUT'){user=null;state=null;show('auth')}})}else{show('splash')}
+if(sb){
+ show('splash');
+ sb.auth.onAuthStateChange((event,session)=>{
+  if((event==='SIGNED_IN'||event==='INITIAL_SESSION'||event==='TOKEN_REFRESHED')&&session?.user){enter(session.user);}
+  if(event==='SIGNED_OUT'){user=null;state=null;enteringId=null;show('auth');authPanel('login');}
+ });
+ sb.auth.getSession().then(({data,error})=>{
+  if(error){console.error(error);show('splash');return;}
+  if(data.session?.user)enter(data.session.user);else show('splash');
+ });
+}else{show('splash')}
 </script></body></html>
