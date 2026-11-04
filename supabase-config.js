@@ -1,4 +1,4 @@
-// Public browser configuration. The anon/publishable key is designed to be used in client apps.
-// Never put a Supabase service_role key or database password in this file.
-export const SUPABASE_URL = 'YOUR-PROJECT-URL';
-export const SUPABASE_ANON_KEY = 'YOUR-ANON-OR-PUBLISHABLE-KEY';
+// Public browser configuration. The publishable key is designed for client apps.
+// Never put a Supabase secret/service_role key or database password in this file.
+export const SUPABASE_URL = 'https://gkxwutcisajstievzpby.supabase.co';
+export const SUPABASE_ANON_KEY = 'sb_publishable_x42qWR3bzytQJyj1Pb_6Lw_-rqLasA2';
